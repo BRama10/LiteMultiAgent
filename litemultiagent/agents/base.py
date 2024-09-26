@@ -2,15 +2,18 @@ from typing import Any, Optional
 import json
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from litemultiagent.core.config import AGENT_TO_MODEL, MODEL_COST, AgentLogger
-from litemultiagent.core.env import supabase
+from litemultiagent.utils.config import AGENT_TO_MODEL, MODEL_COST, AgentLogger
+from litemultiagent.utils.env import supabase
 
 from litellm import completion
 from openai.types.chat import ChatCompletion
+import os
+import csv
+from datetime import datetime
 
 class Agent:
     def __init__(self, agent_name: str, tools: list[dict[str, Any]], available_tools: dict[str, callable],
-                 meta_task_id: Optional[str] = None, task_id: Optional[int] = None):
+                 meta_task_id: Optional[str] = None, task_id: Optional[int] = None, save_to="csv", log="log"):
         self.agent_name = agent_name
         self.tools = tools
         self.available_tools = available_tools
@@ -19,8 +22,8 @@ class Agent:
         self.messages = []
         self.meta_task_id = meta_task_id
         self.task_id = task_id
-
-        
+        self.save_to = save_to
+        self.log = log
 
 
     def send_prompt(self, content: str) -> str:
@@ -38,7 +41,10 @@ class Agent:
                 messages=self.messages
             )
             self._log_response(response, depth)
-            self._save_to_supabase(response, depth)
+            if self.save_to == "supabase":
+                self._save_to_supabase(response, depth)
+            if self.save_to == "csv":
+                self._save_to_csv(response, depth)
             message = response.choices[0].message
             self.messages.append(message)
             return message.content
@@ -51,7 +57,10 @@ class Agent:
         )
 
         self._log_response(response, depth)
-        self._save_to_supabase(response, depth)
+        if self.save_to == "supabase":
+            self._save_to_supabase(response, depth)
+        if self.save_to == "csv":
+            self._save_to_csv(response, depth)
 
         tool_calls = response.choices[0].message.tool_calls
 
@@ -113,6 +122,46 @@ class Agent:
         AgentLogger.info(
             f'Agent: {self.agent_name}, prompt tokens: {response.usage.prompt_tokens}, completion tokens: {response.usage.completion_tokens}')
         AgentLogger.info(f'Agent: {self.agent_name}, depth: {depth}, response: {response}')
+
+    def _save_to_csv(self, response, depth):
+        usage_dict = self._extract_cost(response)
+        data = {
+            "meta_task_id": self.meta_task_id,
+            "task_id": self.task_id,
+            "agent": self.agent_name,
+            "depth": depth,
+            "role": "assistant",
+            "response": json.dumps(response.choices[0].message.model_dump()),
+            "prompt_tokens": response.usage.prompt_tokens,
+            "completion_tokens": response.usage.completion_tokens,
+            "input_cost": usage_dict["input_cost"],
+            "output_cost": usage_dict["output_cost"],
+            "total_cost": usage_dict["total_cost"],
+            "model_name": self.model_name,
+            "timestamp": datetime.now().isoformat()
+        }
+
+        filename = os.path.join(self.log, f"multiagent_data_{datetime.now().strftime('%Y%m%d')}.csv")
+        file_exists = os.path.isfile(filename)
+
+        # Ensure the directory exists
+        os.makedirs(os.path.dirname(filename), exist_ok=True)
+
+        # If file doesn't exist, create it with header
+        if not file_exists:
+            with open(filename, 'w', newline='') as csvfile:
+                fieldnames = list(data.keys())
+                writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+                writer.writeheader()
+            AgentLogger.info(f"Created new CSV file with header: {filename}")
+
+        # Append data to the file
+        with open(filename, 'a', newline='') as csvfile:
+            fieldnames = list(data.keys())
+            writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+            writer.writerow(data)
+
+        AgentLogger.info(f"Data saved to CSV: {filename}")
 
     def _save_to_supabase(self, response: ChatCompletion, depth):
         if supabase is None:

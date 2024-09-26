@@ -7,7 +7,7 @@ import time
 import argparse
 import concurrent.futures
 import uuid
-from litemultiagent.core.config import AGENT_TO_MODEL
+from litemultiagent.utils.config import AGENT_TO_MODEL
 from litemultiagent.utils.tools import Tools
 
 
@@ -44,7 +44,7 @@ class Main_Agent(Agent):
 
         available_tools = {
             "scan_folder": scan_folder,
-            "use_retrieval_agent": lambda description: self.manager.use_agent(AgentType.RETRIEVE_DB, description, meta_task_id=meta_task_id, task_id=task_id),
+            "use_retrieval_agent": lambda description: self.manager.use_agent(AgentType.RETRIEVE, description, meta_task_id=meta_task_id, task_id=task_id),
             "use_io_agent": lambda description: self.manager.use_agent(AgentType.IO, description, meta_task_id=meta_task_id, task_id=task_id),
             "use_exec_agent": lambda description: self.manager.use_agent(AgentType.EXEC, description, meta_task_id=meta_task_id, task_id=task_id),
         }
